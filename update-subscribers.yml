@@ -1,0 +1,55 @@
+name: Update YouTube Subscriber Count
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # tiap 6 jam
+  workflow_dispatch: {}       # bisa dipicu manual dari tab Actions
+
+permissions:
+  contents: write
+
+jobs:
+  update-subscribers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Fetch subscriber count from YouTube API
+        env:
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
+          YT_CHANNEL_HANDLE: ${{ vars.YT_CHANNEL_HANDLE }}
+        run: |
+          set -e
+
+          if [ -z "$YT_API_KEY" ] || [ -z "$YT_CHANNEL_HANDLE" ]; then
+            echo "YT_API_KEY (Secret) atau YT_CHANNEL_HANDLE (Variable) belum di-set di Settings repo."
+            exit 1
+          fi
+
+          HANDLE="$YT_CHANNEL_HANDLE"
+          if [[ "$HANDLE" != @* ]]; then HANDLE="@${HANDLE}"; fi
+
+          RESPONSE=$(curl -s "https://www.googleapis.com/youtube/v3/channels?part=statistics&forHandle=${HANDLE}&key=${YT_API_KEY}")
+          COUNT=$(echo "$RESPONSE" | jq -r '.items[0].statistics.subscriberCount // empty')
+
+          if [ -z "$COUNT" ]; then
+            echo "Gagal ambil subscriber count. Response dari YouTube API:"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          cat <<EOF > subscribers.json
+          {
+            "subscriberCount": $COUNT,
+            "updatedAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          }
+          EOF
+
+          echo "Subscriber count updated: $COUNT"
+
+      - name: Commit subscribers.json if it changed
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update YouTube subscriber count"
+          file_pattern: subscribers.json
